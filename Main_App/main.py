@@ -2,6 +2,7 @@ import streamlit as st
 import os
 import time
 import pandas as pd
+from streamlit.errors import StreamlitSecretNotFoundError
 from services.auth.login_wall import render_login_wall
 from services.state.session_defaults import initial_session_defaults
 from services.config.workout_config import EXERCISE_OPTIONS
@@ -35,19 +36,27 @@ def main():
 
     initial_session_defaults()
 
-    if "voice_pipeline" not in st.session_state:
-        try:
-            api_key = os.environ.get("GROQ_API_KEY", "")
+    if not st.session_state.get("voice_pipeline"):
+        api_key = os.environ.get("GROQ_API_KEY", "").strip()
 
-            if not api_key and hasattr(st, "secrets") and "GROQ_API_KEY" in st.secrets:
-                api_key = st.secrets["GROQ_API_KEY"]
-            
+        if not api_key:
+            try:
+                api_key = str(st.secrets.get("GROQ_API_KEY", "")).strip()
+            except StreamlitSecretNotFoundError:
+                api_key = ""
+
+        if api_key:
             groq_client = Groq(api_key=api_key)
             llm_coach = LLMCoach(groq_client)
             tts = TextToSpeech()
             st.session_state.voice_pipeline = VoicePipeline(llm_coach, tts)
-        except Exception as e:
+            st.session_state.coach_setup_error = None
+        else:
             st.session_state.voice_pipeline = None
+            st.session_state.coach_setup_error = (
+                "AI coaching is disabled because GROQ_API_KEY is not configured. "
+                "Add it to your Streamlit Cloud app secrets; workouts can still continue."
+            )
 
     workout_started = st.session_state.get("workout_started", False)
     
@@ -174,6 +183,12 @@ def main():
     if st.session_state.get("coach_feedback"):
         st.markdown("")
         st.success(f"🤖 **Coach:** {st.session_state.coach_feedback}")
+
+    coach_error = st.session_state.get("coach_setup_error")
+    if st.session_state.get("voice_pipeline") and st.session_state.voice_pipeline.error:
+        coach_error = st.session_state.voice_pipeline.error
+    if coach_error:
+        st.warning(coach_error)
 
     if not workout_started:
         st.markdown(
