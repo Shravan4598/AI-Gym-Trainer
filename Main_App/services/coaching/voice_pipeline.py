@@ -1,6 +1,5 @@
 import time
 import streamlit as st
-from groq import APIConnectionError, APIStatusError
 
 
 class VoicePipeline:
@@ -8,8 +7,6 @@ class VoicePipeline:
         self.llm = llm
         self.tts = tts
         self.last_spoken_at = 0
-        self.retry_after = 0
-        self.error = None
 
     def _find_form_issue(self, exercise, metrics):
         if "issue" in metrics:
@@ -70,8 +67,6 @@ class VoicePipeline:
         issue = self._find_form_issue(exercise, metrics)
 
         now = time.time()
-        if now < self.retry_after:
-            return None
 
         is_major_issue = event in ["workout_started", "set_completed", "workout_completed"]
 
@@ -82,26 +77,9 @@ class VoicePipeline:
             if now - self.last_spoken_at < 5:
                 return None
             
-        try:
-            text = self.llm.give_feedback(event, issue)
-        except APIConnectionError:
-            self.error = (
-                "The AI coach couldn't connect to Groq. Check the service status and "
-                "Streamlit Cloud logs; your workout can continue without voice coaching."
-            )
-            self.retry_after = now + 30
-            return None
-        except APIStatusError as error:
-            self.error = (
-                f"Groq returned HTTP {error.status_code}. Check the API key, account "
-                "limits, or billing; your workout can continue without voice coaching."
-            )
-            self.retry_after = now + 30
-            return None
-
+        text = self.llm.give_feedback(event, issue)
         voice = self.tts.speak(text)
 
-        self.error = None
         self.last_spoken_at = now
 
         return voice, text
